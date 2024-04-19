@@ -37,8 +37,10 @@ void setup() {
   pinMode(rightMotorDir1, OUTPUT);
   pinMode(rightMotorDir2, OUTPUT);
   pinMode(standbyPin, OUTPUT);
-
+  
   // Setup PWM channels
+  const int pwmChannelLeftMotor = 0;
+  const int pwmChannelRightMotor = 1;
   ledcSetup(pwmChannelLeftMotor, 5000, 8);    // 5000 Hz frequency, 8-bit resolution
   ledcSetup(pwmChannelRightMotor, 5000, 8);   // 5000 Hz frequency, 8-bit resolution
 
@@ -60,6 +62,7 @@ void loop() {
 
 }
 
+/*
 // Function to measure distance using ultrasonic sensor
 int getDistance() {
   digitalWrite(trigPin, LOW);
@@ -71,6 +74,7 @@ int getDistance() {
   int distance = duration * 0.034 / 2;  // Convert time to distance (cm)
   return distance;
 }
+*/
 
 // Function to move the robot forward
 void moveForward(int speed) {
