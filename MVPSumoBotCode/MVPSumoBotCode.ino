@@ -1,31 +1,25 @@
 #include <SparkFun_TB6612.h>
+#include <TFMPlus.h>
+#include <Wire.h>
+#include <TFLI2C.h>
+
+TFLI2C tflI2C;
+int16_t  tfDist;    // distance in centimeters
+int16_t  tfAddr = TFL_DEF_ADR;
 
 // Define pins for reflectance sensors
 const int leftReflectancePin = A0;  // Left reflectance sensor pin
 const int rightReflectancePin = A1; // Right reflectance sensor pin
 
 // Define pins for motor control
-// Pinout: https://docs.arduino.cc/tutorials/nano-esp32/pin-setup/
-// int ledChannelLeft = 0;
-// int ledChannelRight = 1;
-
-// const int leftMotorPWM = 5;      // PWM pin for left motor speed control
-// const int leftMotorDir1 = 6;    // Direction pin 1 for left motor
-// const int leftMotorDir2 = 7;    // Direction pin 2 for left motor
-
 const int leftMotorPWM = 3;  // PWM pin for left motor speed control
 const int leftMotorDir1 = 4; // Direction pin 1 for left motor
 const int leftMotorDir2 = 2; // Direction pin 2 for left motor
-
-// const int rightMotorPWM = 17;     // PWM pin for right motor speed control
-// const int rightMotorDir1 = 9;    // Direction pin 1 for right motor
-// const int rightMotorDir2 = 10;    // Direction pin 2 for right motor
 
 const int rightMotorPWM = 9;  // PWM pin for right motor speed control
 const int rightMotorDir1 = 6; // Direction pin 1 for right motor
 const int rightMotorDir2 = 7; // Direction pin 2 for right motor
 
-// const int standbyPin = 8;       // Standby pin for motor controller
 const int standbyPin = 5; // Standby pin for motor controller
 
 // Define motor speed
@@ -35,14 +29,19 @@ const int maxSpeed = 255;      // Maximum motor speed
 // line up with function names like forward.  Value can be 1 or -1
 const int offsetA = 1;
 const int offsetB = 1;
-Motor motor1 = Motor(leftMotorDir1, leftMotorDir2, leftMotorPWM, offsetA, standbyPin);
-Motor motor2 = Motor(rightMotorDir1, rightMotorDir2, rightMotorPWM, offsetB, standbyPin);
+Motor motor_left = Motor(leftMotorDir1, leftMotorDir2, leftMotorPWM, offsetA, standbyPin);
+Motor motor_right = Motor(rightMotorDir1, rightMotorDir2, rightMotorPWM, offsetB, standbyPin);
 
 //Define sensor thresholds
-const int lineThreshold = 1000;      // Reflectance sensor threshold
+const int leftLineThreshold = 200;      // Reflectance sensor threshold
+const int rightLineThreshold = 200;      // Reflectance sensor threshold
+
+const int distThresh = 30;
 
 void setup()
 {
+  Serial.begin(115200);
+  
   // Initialize pins
   pinMode(leftMotorDir1, OUTPUT);
   pinMode(leftMotorDir2, OUTPUT);
@@ -53,44 +52,112 @@ void setup()
   pinMode(leftReflectancePin, INPUT);
   pinMode(rightReflectancePin, INPUT);
 
-  //  pinMode(D7, OUTPUT);
-  //  pinMode(D6, OUTPUT);
-
-  // Setup PWM channels
-  //  ledcSetup(ledChannelLeft, 5000, 8);    // 5000 Hz frequency, 8-bit resolution
-  //  ledcSetup(ledChannelRight, 5000, 8);   // 5000 Hz frequency, 8-bit resolution
-
-  // Attach PWM channels to GPIO pins
-  //  ledcAttachPin(ledChannelLeft, leftMotorPWM);
-  //  ledcAttachPin(ledChannelRight, rightMotorPWM);
+  Wire.begin();
 
   // Enable motor controller
   digitalWrite(standbyPin, HIGH);
 
-  Serial.begin(115200); // Initialize serial communication
+  Serial.print("LIDAR Reset: ");
+    if( tflI2C.Soft_Reset( tfAddr))
+    {
+        Serial.println( "Passed");
+    }
+    else tflI2C.printStatus();
+
+  Serial.print( "Set Frame Rate to: ");
+  uint16_t tfFrame = FPS_250;
+  if( tflI2C.Set_Frame_Rate( tfFrame, tfAddr))
+  {
+    Serial.println( tfFrame);
+  }
+  else tflI2C.printStatus();
+
+  delay(5000);
+}
+
+void handleLine() {
+  motor_right.drive(-255);
+  motor_left.drive(-255);
+  delay(100);
+  motor_right.brake();
+  motor_left.brake();
 }
 
 void loop()
 {
-  Serial.println("yo3");
+  if (checkLine() == 1) {
+    Serial.println("STOP");
+    handleLine();
+  }
+  
+  motor_right.drive(150);
+
+  if (tflI2C.getData( tfDist, tfAddr) && tfDist < distThresh) {
+          //      Serial.print("Dist: ");
+  //      Serial.println(tfDist);
+    Serial.println("BANG");
+    motor_right.drive(255);
+    motor_left.drive(255);
+    while (1) {
+      bool mustStop = false;
+      bool needs_180 = false;
+      if (tflI2C.getData( tfDist, tfAddr) && tfDist > distThresh) {
+          mustStop = true;
+       } else if (checkLine() == 1) {
+          mustStop = true;
+          needs_180 = true;
+       }
+       
+       if (mustStop) {
+        Serial.println("STOP");
+        motor_right.brake();
+        motor_left.brake();
+        if (needs_180) {
+          handleLine();
+        }
+        break;
+      }
+    } 
+  }
+
+  delay(5);
+}
+
+void printReflectance() {
   int leftReflectance = analogRead(leftReflectancePin);
   int rightReflectance = analogRead(rightReflectancePin);
-  Serial.println("Left Reflector value:");
-  Serial.println(leftReflectance);
-  Serial.println("Right Reflector value:");
-  Serial.println(rightReflectance);
-  /*
-  motor1.drive(255, 1000);
-  motor1.drive(-255, 1000);
-  motor1.brake();
-  motor2.drive(255, 1000);
-  motor2.drive(-255, 1000);
-  motor2.brake();
-  // digitalWrite(leftMotorPWM, HIGH);
-  //  digitalWrite(10, HIGH);
-  //  digitalWrite(9, HIGH);
-  */
-  delay(1000);
+  Serial.print("left: ");
+  Serial.print(leftReflectance);
+  Serial.print(" right: ");
+  Serial.print(rightReflectance);
+  Serial.println();
+}
+
+// TODO: return diff failure modes
+int loopAndCheckLine(unsigned long delayMillis) {
+  unsigned long start = millis();
+  while (millis() - start < delayMillis) {
+    if (checkLine != 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int checkLine() {
+  int leftReflectance = analogRead(leftReflectancePin);
+  int rightReflectance = analogRead(rightReflectancePin);
+  if (leftReflectance < leftLineThreshold) {
+//    Serial.print("LEFT ");
+//    Serial.println(leftReflectance);
+    return 1;
+  }
+  if (rightReflectance < rightLineThreshold) {
+//    Serial.print("RIGHT ");
+//    Serial.println(rightReflectance);
+    return 1;
+  }
+  return 0;
 }
 
 /*
